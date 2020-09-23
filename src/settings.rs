@@ -24,8 +24,10 @@ impl Settings {
         }
     }
 
-    pub fn load(file: &Path) -> Settings {
+    pub fn load(file: &Path) -> Settings{
         let f = OpenOptions::new().read(true).write(false).open(&file);
+
+        //return Err(io::Error::new(io::ErrorKind::NotFound, "The file 'appids.json' was not found!"));
 
         let mut f = match f {
             Ok(file) => file,
@@ -36,8 +38,6 @@ impl Settings {
         f.read_to_string(&mut contents).unwrap();
 
         //let _settings: Settings = toml::from_str(contents.as_str()).unwrap();
-
-        //_settings
 
         toml::from_str(contents.as_str()).unwrap()
     }

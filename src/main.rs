@@ -1,5 +1,5 @@
 use std::io;
-use std::io::BufReader;
+use std::io::{BufReader};
 use std::fs;
 use std::fs::File;
 use std::path::Path;
@@ -23,7 +23,14 @@ use serde_json::Value;
 // TODO 20.09.2020: Download the appids.json instead of manually adding it.
 fn main() {
     if let Err(_e) = run() {
-        println!("Something went wrong!");
+        //println!("Something went wrong!");
+        match _e.kind() {
+            io::ErrorKind::Other => println!("Heads up: '{}'", _e),
+            io::ErrorKind::NotFound => println!("NotFound Error: '{}'", _e),
+            _ => println!("Oh fiddlestricks, what now?")
+        }
+
+        thread::sleep(std::time::Duration::from_secs(5));
         std::process::exit(1);
     }
     else {
@@ -35,7 +42,7 @@ fn run() -> io::Result<()> {
     let exe = std::env::current_exe().unwrap();
     let app_dir = exe.parent().unwrap();
 
-    let appid_path = &app_dir.join("appids.json");
+    let dir_appids = &app_dir.join("appids.json");
     let dir_settings = &app_dir.join("settings.toml");
 
     let term = Term::stdout();
@@ -47,18 +54,21 @@ fn run() -> io::Result<()> {
     //term.write_line(format!("{}", style("C:\\Users\\wolji\\Pictures\\Screenshots\\Screenshot (471).png").color256(248)).as_str())?;  
 
     //finish(&term);
+
+    if !dir_appids.exists() {
+        return Err(io::Error::new(io::ErrorKind::NotFound, "The file 'appids.json' was not found!"));       
+    }
     
     // SETTINGS - START
     if !dir_settings.exists() {
         Settings::save(dir_settings.as_path(), &Settings::new());
-        term.write_line("Settings file created!\nPlease edit and press any key to continue!")?;
+        term.write_line("Settings file created!\nPlease edit and press ENTER to continue!")?;
         term.show_cursor()?;
-        drop(term.read_key());
-    }
+        drop(term.read_line());        
+    } 
 
     let m_settings: Settings = Settings::load(dir_settings.as_path());
     // SETTINGS - END
-
 
     // ARG PROCESSING - START
     let mut noinput: bool = false;
@@ -78,14 +88,14 @@ fn run() -> io::Result<()> {
     let appid_map: HashMap<i32, String> = {
         let appids: Value = {
 
-            let file_appids = File::open(appid_path).unwrap();
+            let file_appids = File::open(dir_appids).unwrap();
             let appids_reader = BufReader::new(file_appids);
 
             serde_json::from_reader(appids_reader).unwrap()
         };
 
-         let mut _map: HashMap<i32, String> = HashMap::new();
-         let appid_length = appids["applist"]["apps"].as_array().unwrap().len();
+        let mut _map: HashMap<i32, String> = HashMap::new();
+        let appid_length = appids["applist"]["apps"].as_array().unwrap().len();
     
         for i in 0..appid_length {
             let _appid = appids["applist"]["apps"][i]["appid"].as_i64().unwrap().clone() as i32;
@@ -111,6 +121,7 @@ fn run() -> io::Result<()> {
                 retreived_app_name = retreived_app_name.trim().to_string();
 
                 term.write_line(format!("{}", style(format!("Found game '{0}' with AppID '{1}'", &retreived_app_name, &folder_id).as_str()).color256(244)).as_str())?;
+                thread::sleep(std::time::Duration::from_millis(100));
             
                 if folder_id > 0 {
                     let target_path = &Path::new(&m_settings.target_folder).join(retreived_app_name);
@@ -128,17 +139,16 @@ fn run() -> io::Result<()> {
                             let mut from_paths = Vec::new();
                             from_paths.push(img);
 
-                            if !target_file.exists() {
-
+                            if !target_file.exists() {                               
                                 term.write_line(format!("{}", style(target_file.to_str().unwrap()).color256(250)).as_str())?;
 
                                 let copy = fs_extra::copy_items(&from_paths, &target_path, &options);
-                                let copy = match copy {
+                                match copy {
                                     Ok(_) => {}
                                     Err(err) => println!("ERROR: {}", err),
                                 };
 
-                                thread::sleep(std::time::Duration::from_millis(30));
+                                thread::sleep(std::time::Duration::from_millis(50));
                             }  
                             
                             drop(from_paths);
@@ -163,12 +173,13 @@ fn run() -> io::Result<()> {
     if !noinput {
         finish(&term);
     }
-    Ok(())
+
+    Ok(())   
 }
 
 // Just a test function i made to test our borrowing.
 fn finish(term: &Term) {
-    term.write_line("Done! Press ANY KEY to exit!").unwrap();
+    term.write_line("Done! Press ENTER to exit!").unwrap();
     term.show_cursor().unwrap();
     //drop(term.read_key());
     drop(term.read_line());
