@@ -1,3 +1,0 @@
-steam_folder = 'C:\Program Files (x86)\Steam\userdata'
-target_folder = 'games'
-force_disable_update = false
