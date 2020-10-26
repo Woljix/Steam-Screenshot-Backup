@@ -1,14 +1,19 @@
 use std::io;
-use std::io::{BufReader};
+use std::io::{BufReader, Write};
 use std::fs;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::path::Path;
 use std::thread;
+use std::time::{SystemTime};
 
 use std::collections::HashMap;
 
 use console::Term;
 use console::style;
+
+use reqwest;
+
+use chrono;
 
 mod settings;
 use settings::Settings;
@@ -19,8 +24,10 @@ use glob::glob;
 use fs_extra;
 use serde_json::Value;
 
+const STEAM_APP_LIST_URL: &str = "https://api.steampowered.com/ISteamApps/GetAppList/v2/";
 // 8 bit colors: https://jonasjacek.github.io/colors/
 // TODO 20.09.2020: Download the appids.json instead of manually adding it.
+// EDIT 27.10.2020: i actually did the thing! It nows downloads the appids.json file! :D
 fn main() {
     if let Err(_e) = run() {
         //println!("Something went wrong!");
@@ -55,10 +62,6 @@ fn run() -> io::Result<()> {
 
     //finish(&term);
 
-    if !dir_appids.exists() {
-        return Err(io::Error::new(io::ErrorKind::NotFound, "The file 'appids.json' was not found!"));       
-    }
-    
     // SETTINGS - START
     if !dir_settings.exists() {
         Settings::save(dir_settings.as_path(), &Settings::new());
@@ -84,6 +87,37 @@ fn run() -> io::Result<()> {
 
     // APP ID LIST - START
 
+    if !m_settings.force_disable_update {
+        let mut _is_ready = false;
+
+        while !_is_ready {
+            if !dir_appids.exists() {
+                let body = reqwest::blocking::get(STEAM_APP_LIST_URL).unwrap().text().unwrap();
+                let mut f = OpenOptions::new().read(true).write(true).create(true).open(dir_appids).unwrap();
+    
+                f.write_all(body.as_bytes()).unwrap(); 
+            }
+            else {
+                let metadata = fs::metadata(dir_appids).unwrap();
+    
+                match SystemTime::now().duration_since(metadata.modified().unwrap()) {
+                    Ok(m) => { 
+                        if chrono::Duration::from_std(m).unwrap() >= chrono::Duration::days(7) {
+                            term.write_line("App id file outdated! Deleting..")?;
+                            fs::remove_file(dir_appids).unwrap();
+                        }
+                        else {                        
+                            _is_ready = true; // Everything is in check! So lets continue!
+                        }
+                    },
+                    Err(_) => {
+                        panic!("SystemTime not valid!");
+                    },
+                }
+            }
+        }
+    }
+    
     // Note: Fairly memory intensive in the beginning peaking at around 80mb but drops down to around 10mb when finished.
     let appid_map: HashMap<i32, String> = {
         let appids: Value = {
@@ -180,7 +214,7 @@ fn run() -> io::Result<()> {
 // Just a test function i made to test our borrowing.
 fn finish(term: &Term) {
     term.write_line("Done! Press ENTER to exit!").unwrap();
-    term.show_cursor().unwrap();
+    //term.show_cursor().unwrap();
     //drop(term.read_key());
     drop(term.read_line());
 }
