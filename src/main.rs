@@ -1,11 +1,11 @@
 use std::io;
-use std::io::{BufReader, Write};
+use std::io::{BufReader, Write, ErrorKind};
 use std::fs;
 use std::fs::{File, OpenOptions};
 use std::path::Path;
 use std::thread;
-use std::time::{SystemTime};
-
+use std::time::{SystemTime, Duration};
+use std::process;
 use std::collections::HashMap;
 
 use console::Term;
@@ -30,18 +30,17 @@ const STEAM_APP_LIST_URL: &str = "https://api.steampowered.com/ISteamApps/GetApp
 // EDIT 27.10.2020: i actually did the thing! It nows downloads the appids.json file! :D
 fn main() {
     if let Err(_e) = run() {
-        //println!("Something went wrong!");
         match _e.kind() {
-            io::ErrorKind::Other => println!("Heads up: '{}'", _e),
-            io::ErrorKind::NotFound => println!("NotFound Error: '{}'", _e),
-            _ => println!("Oh fiddlestricks, what now?")
+            ErrorKind::Other => println!("Heads up: '{}'", _e),
+            ErrorKind::NotFound => println!("NotFound Error: '{}'", _e),
+            _ => /*println!("Oh fiddlestricks, what now?")*/ println!("Error Detected: '{}'", _e),
         }
 
-        thread::sleep(std::time::Duration::from_secs(5));
-        std::process::exit(1);
+        thread::sleep(Duration::from_secs(5));
+        process::exit(1);
     }
     else {
-        std::process::exit(0);
+        process::exit(0);
     }    
 }
 
@@ -88,14 +87,25 @@ fn run() -> io::Result<()> {
     // APP ID LIST - START
 
     if !m_settings.force_disable_update {
-        let mut _is_ready = false;
-
-        while !_is_ready {
+        loop { // Absolutelly dirty way of doing this, but you know what? It works, so screw it, i can't figure out a better way of doing it, so this'll work.
             if !dir_appids.exists() {
-                let body = reqwest::blocking::get(STEAM_APP_LIST_URL).unwrap().text().unwrap();
-                let mut f = OpenOptions::new().read(true).write(true).create(true).open(dir_appids).unwrap();
-    
-                f.write_all(body.as_bytes()).unwrap(); 
+                term.write_line("AppID file not found, trying to download..")?;
+                match reqwest::blocking::get(STEAM_APP_LIST_URL).unwrap().text() {
+                    Ok(body) => {
+                        match OpenOptions::new().read(true).write(true).create(true).open(dir_appids) {
+                            Ok(mut f) => {
+                                f.write_all(body.as_bytes()).unwrap(); 
+                                term.write_line("AppID file downloaded and saved!")?;
+                            },
+                            Err(err) => {
+                                panic!("Error Writing File: {:?}", err);
+                            }
+                        }
+                    },
+                    Err(err) => {
+                        panic!("Error While Getting AppIDs file: {:?}", err);
+                    }
+                };
             }
             else {
                 let metadata = fs::metadata(dir_appids).unwrap();
@@ -103,23 +113,23 @@ fn run() -> io::Result<()> {
                 match SystemTime::now().duration_since(metadata.modified().unwrap()) {
                     Ok(m) => { 
                         if chrono::Duration::from_std(m).unwrap() >= chrono::Duration::days(7) {
-                            term.write_line("App id file outdated! Deleting..")?;
+                            term.write_line("AppID file outdated! Deleting..")?;
                             fs::remove_file(dir_appids).unwrap();
                         }
                         else {                        
-                            _is_ready = true; // Everything is in check! So lets continue!
+                            break;
                         }
                     },
                     Err(_) => {
-                        panic!("SystemTime not valid!");
+                        panic!("SystemTime not valid time format!"); // Not sure when this will happen tbh, but its safe to be safe.
                     },
-                }
+                };
             }
         }
     }
     
     // Note: Fairly memory intensive in the beginning peaking at around 80mb but drops down to around 10mb when finished.
-    let appid_map: HashMap<i32, String> = {
+    let appid_map: HashMap<u32, String> = {
         let appids: Value = {
 
             let file_appids = File::open(dir_appids).unwrap();
@@ -128,11 +138,11 @@ fn run() -> io::Result<()> {
             serde_json::from_reader(appids_reader).unwrap()
         };
 
-        let mut _map: HashMap<i32, String> = HashMap::new();
+        let mut _map: HashMap<u32, String> = HashMap::new();
         let appid_length = appids["applist"]["apps"].as_array().unwrap().len();
     
         for i in 0..appid_length {
-            let _appid = appids["applist"]["apps"][i]["appid"].as_i64().unwrap().clone() as i32;
+            let _appid = appids["applist"]["apps"][i]["appid"].as_i64().unwrap().clone() as u32;
             let _name = appids["applist"]["apps"][i]["name"].to_string();
             
             _map.insert(_appid, _name);
@@ -147,7 +157,7 @@ fn run() -> io::Result<()> {
     for entry in WalkDir::new(&m_settings.steam_folder).follow_links(false).into_iter() {
         let e = &entry.unwrap();
         if e.file_type().is_dir() && e.file_name().to_string_lossy() == "screenshots" {
-            let folder_id: i32 = e.clone().path().parent().unwrap().file_name().unwrap().to_string_lossy().trim().parse().unwrap_or(0);
+            let folder_id: u32 = e.clone().path().parent().unwrap().file_name().unwrap().to_string_lossy().trim().parse().unwrap_or(0);
 
             if appid_map.contains_key(&folder_id) {
                 let mut retreived_app_name = appid_map.get(&folder_id).unwrap().clone();
@@ -155,7 +165,7 @@ fn run() -> io::Result<()> {
                 retreived_app_name = retreived_app_name.trim().to_string();
 
                 term.write_line(format!("{}", style(format!("Found game '{0}' with AppID '{1}'", &retreived_app_name, &folder_id).as_str()).color256(244)).as_str())?;
-                thread::sleep(std::time::Duration::from_millis(100));
+                thread::sleep(Duration::from_millis(100));
             
                 if folder_id > 0 {
                     let target_path = &Path::new(&m_settings.target_folder).join(retreived_app_name);
@@ -182,7 +192,7 @@ fn run() -> io::Result<()> {
                                     Err(err) => println!("ERROR: {}", err),
                                 };
 
-                                thread::sleep(std::time::Duration::from_millis(50));
+                                thread::sleep(Duration::from_millis(50));
                             }  
                             
                             drop(from_paths);
