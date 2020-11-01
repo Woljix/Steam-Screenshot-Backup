@@ -2,7 +2,7 @@ use std::io;
 use std::io::{BufReader, Write, ErrorKind};
 use std::fs;
 use std::fs::{File, OpenOptions};
-use std::path::Path;
+use std::path::{PathBuf, Path};
 use std::thread;
 use std::time::{SystemTime, Duration};
 use std::process;
@@ -10,6 +10,7 @@ use std::collections::HashMap;
 
 use console::Term;
 use console::style;
+use console::Style;
 
 use reqwest;
 
@@ -25,28 +26,37 @@ use fs_extra;
 use serde_json::Value;
 
 const STEAM_APP_LIST_URL: &str = "https://api.steampowered.com/ISteamApps/GetAppList/v2/";
+
+const COLOR_DARK_GRAY: u8 = 244;
+const COLOR_LIGHT_GRAY: u8 = 250;
+const COLOR_WARNING_YELLOW: u8 = 143;
+
 // 8 bit colors: https://jonasjacek.github.io/colors/
 // TODO 20.09.2020: Download the appids.json instead of manually adding it.
 // EDIT 27.10.2020: i actually did the thing! It nows downloads the appids.json file! :D
+// NOTE 01.11.2020: This probably won't work out of the box on Linux, mostly because i have no idea how Steam's storage system works on Linux. Mild changes are probably required for it to work.
 fn main() {
-    if let Err(_e) = run() {
-        match _e.kind() {
-            ErrorKind::Other => println!("Heads up: '{}'", _e),
-            ErrorKind::NotFound => println!("NotFound Error: '{}'", _e),
-            _ => /*println!("Oh fiddlestricks, what now?")*/ println!("Error Detected: '{}'", _e),
-        }
-
-        thread::sleep(Duration::from_secs(5));
-        process::exit(1);
-    }
-    else {
-        process::exit(0);
-    }    
+    match run() {
+        Err(e) => {
+            match e.kind() {
+                ErrorKind::Other => println!("Heads up: '{}'", e),
+                ErrorKind::NotFound => println!("NotFound Error: '{}'", e),
+                _ => /*println!("Oh fiddlestricks, what now?")*/ println!("Error Detected: '{}'", e),
+            }
+    
+            thread::sleep(Duration::from_secs(5));
+            process::exit(1);
+        },
+        Ok(_) => process::exit(0),
+    };
 }
 
-fn run() -> io::Result<()> {
-    let exe = std::env::current_exe().unwrap();
-    let app_dir = exe.parent().unwrap();
+fn run() -> io::Result<()> {  
+    let app_dir: PathBuf = {
+        let exe = std::env::current_exe().unwrap();
+        let parent = exe.parent().unwrap();
+        parent.to_path_buf()
+    };
 
     let dir_appids = &app_dir.join("appids.json");
     let dir_settings = &app_dir.join("settings.toml");
@@ -56,17 +66,12 @@ fn run() -> io::Result<()> {
 
     term.set_title("Steam Screenshot Backup | Rust Edition");
 
-    //term.write_line(format!("{}", style("Found game 'TEST' with AppID '42000'").color256(242)).as_str())?;
-    //term.write_line(format!("{}", style("C:\\Users\\wolji\\Pictures\\Screenshots\\Screenshot (471).png").color256(248)).as_str())?;  
-
-    //finish(&term);
-
     // SETTINGS - START
     if !dir_settings.exists() {
         Settings::save(dir_settings.as_path(), &Settings::new());
         term.write_line("Settings file created!\nPlease edit and press ENTER to continue!")?;
         term.show_cursor()?;
-        drop(term.read_line());        
+        term.read_line()?;        
     } 
 
     let m_settings: Settings = Settings::load(dir_settings.as_path());
@@ -87,9 +92,10 @@ fn run() -> io::Result<()> {
     // APP ID LIST - START
 
     if !m_settings.force_disable_update {
-        loop { // Absolutelly dirty way of doing this, but you know what? It works, so screw it, i can't figure out a better way of doing it, so this'll work.
+        let mut is_ready = false;
+        while !is_ready { // Absolutelly dirty way of doing this, but you know what? It works, so screw it, i can't figure out a better way of doing it, so this'll work.
             if !dir_appids.exists() {
-                term.write_line("AppID file not found, trying to download..")?;
+                term.write_line("AppID file is missing, attempting to download..")?;
                 match reqwest::blocking::get(STEAM_APP_LIST_URL).unwrap().text() {
                     Ok(body) => {
                         match OpenOptions::new().read(true).write(true).create(true).open(dir_appids) {
@@ -117,7 +123,7 @@ fn run() -> io::Result<()> {
                             fs::remove_file(dir_appids).unwrap();
                         }
                         else {                        
-                            break;
+                            is_ready = true;
                         }
                     },
                     Err(_) => {
@@ -131,7 +137,6 @@ fn run() -> io::Result<()> {
     // Note: Fairly memory intensive in the beginning peaking at around 80mb but drops down to around 10mb when finished.
     let appid_map: HashMap<u32, String> = {
         let appids: Value = {
-
             let file_appids = File::open(dir_appids).unwrap();
             let appids_reader = BufReader::new(file_appids);
 
@@ -164,7 +169,7 @@ fn run() -> io::Result<()> {
                 retreived_app_name.retain(|c| !r#"[\/?:*""><|]+"#.contains(c)); // FILTER
                 retreived_app_name = retreived_app_name.trim().to_string();
 
-                term.write_line(format!("{}", style(format!("Found game '{0}' with AppID '{1}'", &retreived_app_name, &folder_id).as_str()).color256(244)).as_str())?;
+                term.write_line(format!("{}", style(format!("Found game '{0}' with AppID '{1}'", &retreived_app_name, &folder_id).as_str()).color256(COLOR_DARK_GRAY)).as_str())?;
                 thread::sleep(Duration::from_millis(100));
             
                 if folder_id > 0 {
@@ -184,13 +189,10 @@ fn run() -> io::Result<()> {
                             from_paths.push(img);
 
                             if !target_file.exists() {                               
-                                term.write_line(format!("{}", style(target_file.to_str().unwrap()).color256(250)).as_str())?;
-
-                                let copy = fs_extra::copy_items(&from_paths, &target_path, &options);
-                                match copy {
-                                    Ok(_) => {}
-                                    Err(err) => println!("ERROR: {}", err),
-                                };
+                                match fs_extra::copy_items(&from_paths, &target_path, &options) {
+                                    Ok(_) => term.write_line(format!("{}", style(target_file.to_str().unwrap()).color256(COLOR_LIGHT_GRAY)).as_str())?,
+                                    Err(_) => term.write_line(format!("{}", style(target_file.to_str().unwrap()).color256(COLOR_WARNING_YELLOW)).as_str())?, // Optimally this should spew out an error, but for now, i will only indicate by color that something is wrong.
+                                }
 
                                 thread::sleep(Duration::from_millis(50));
                             }  
@@ -202,17 +204,6 @@ fn run() -> io::Result<()> {
             }       
         }
     }
- 
-    //let client = reqwest::Client::new();
-    /*
-    for x in 0..255 {
-        term.write_str(format!("{0}", style("X").color256(x)).as_str())?;
-    }
-    */
-    
-    //term.write_line(format!("I have a {0}, haha!", style("lightsaber").color256(243)).as_str())?;
-    //term.write_line(format!("Steam Folder: '{}'", m_settings.steam_folder).as_str())?;
-    //term.write_line("Done!")?;
 
     if !noinput {
         finish(&term);
@@ -226,5 +217,5 @@ fn finish(term: &Term) {
     term.write_line("Done! Press ENTER to exit!").unwrap();
     //term.show_cursor().unwrap();
     //drop(term.read_key());
-    drop(term.read_line());
+    term.read_line().unwrap();
 }

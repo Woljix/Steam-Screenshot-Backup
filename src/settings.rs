@@ -15,6 +15,9 @@ pub struct Settings {
     pub force_disable_update: bool,
 }
 
+// Note 01.11.2020:
+// I'm starting to dislike this approach, as it is not the "Rust way".
+// But it works, and i don't want to change it incase that i break something.
 impl Settings {
     pub fn new() -> Settings {
         Settings { 
@@ -25,19 +28,13 @@ impl Settings {
     }
 
     pub fn load(file: &Path) -> Settings{
-        let f = OpenOptions::new().read(true).write(false).open(&file);
-
-        //return Err(io::Error::new(io::ErrorKind::NotFound, "The file 'appids.json' was not found!"));
-
-        let mut f = match f {
+        let mut f = match OpenOptions::new().read(true).write(false).open(&file) {
             Ok(file) => file,
-            Err(error) => panic!("Problem opening this file: {:?}", error)
+            Err(error) => panic!("Error opening this file: {:?}", error)
         };
 
         let mut contents = String::new();
         f.read_to_string(&mut contents).unwrap();
-
-        //let _settings: Settings = toml::from_str(contents.as_str()).unwrap();
 
         toml::from_str(contents.as_str()).unwrap()
     }
@@ -45,7 +42,10 @@ impl Settings {
     pub fn save(file: &Path, settings: &Settings) {
         let toml = toml::to_string_pretty(settings).unwrap();
 
-        let mut f = OpenOptions::new().read(true).write(true).create(true).open(&file).unwrap();
+        let mut f = match OpenOptions::new().read(true).write(true).create(true).open(&file) {
+            Ok(file) => file,
+            Err(error) => panic!("Error saving this file: {:?}", error)
+        };
                  
         f.write_all(toml.as_bytes()).unwrap();
     }
