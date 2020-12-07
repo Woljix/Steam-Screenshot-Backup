@@ -8,9 +8,7 @@ use std::time::{SystemTime, Duration};
 use std::process;
 use std::collections::HashMap;
 
-use console::Term;
-use console::style;
-use console::Style;
+use console::{Term, style};
 
 use reqwest;
 
@@ -67,14 +65,35 @@ fn run() -> io::Result<()> {
     term.set_title("Steam Screenshot Backup | Rust Edition");
 
     // SETTINGS - START
+    /*
     if !dir_settings.exists() {
-        Settings::save(dir_settings.as_path(), &Settings::new());
+        Settings::save(dir_settings.as_path(), &Settings::default());
         term.write_line("Settings file created!\nPlease edit and press ENTER to continue!")?;
         term.show_cursor()?;
         term.read_line()?;        
     } 
+    */
 
-    let m_settings: Settings = Settings::load(dir_settings.as_path());
+    let m_settings: Settings = if dir_settings.exists() {
+        if let Ok(i) = Settings::load(dir_settings.as_path()) {
+            // If the settings file exists, and it loaded properly; return it.
+            i 
+        }
+        else {
+            // If the settigns file exists, but it for some reason failed to load, take the user to the Settings prompt with a accompaning warning.
+            term.write_line("Your settings file exists; but failed to load!\nPress ENTER to attempt to make a new one and continiue, or CTRL-C to exit.").unwrap();
+            term.read_line().unwrap();
+            settings_prompt(&term)
+        }
+    }
+    else
+    {
+        // If no settings file exists; create one by going through and setting each variable step by step.
+        settings_prompt(&term)
+    };
+
+    // Save the settings file in order to ensure that it is updated and properly formatted.
+    Settings::save(&dir_settings, &m_settings);
     // SETTINGS - END
 
     // ARG PROCESSING - START
@@ -170,7 +189,9 @@ fn run() -> io::Result<()> {
                 retreived_app_name = retreived_app_name.trim().to_string();
 
                 term.write_line(format!("{}", style(format!("Found game '{0}' with AppID '{1}'", &retreived_app_name, &folder_id).as_str()).color256(COLOR_DARK_GRAY)).as_str())?;
-                thread::sleep(Duration::from_millis(100));
+                if !&m_settings.disable_artifical_delay {
+                    thread::sleep(Duration::from_millis(100));
+                }
             
                 if folder_id > 0 {
                     let target_path = &Path::new(&m_settings.target_folder).join(retreived_app_name);
@@ -193,8 +214,11 @@ fn run() -> io::Result<()> {
                                     Ok(_) => term.write_line(format!("{}", style(target_file.to_str().unwrap()).color256(COLOR_LIGHT_GRAY)).as_str())?,
                                     Err(_) => term.write_line(format!("{}", style(target_file.to_str().unwrap()).color256(COLOR_WARNING_YELLOW)).as_str())?, // Optimally this should spew out an error, but for now, i will only indicate by color that something is wrong.
                                 }
-
-                                thread::sleep(Duration::from_millis(50));
+                                
+                                if !&m_settings.disable_artifical_delay {
+                                    thread::sleep(Duration::from_millis(50));
+                                }
+                                
                             }  
                             
                             drop(from_paths);
@@ -218,4 +242,41 @@ fn finish(term: &Term) {
     //term.show_cursor().unwrap();
     //drop(term.read_key());
     term.read_line().unwrap();
+}
+
+fn settings_prompt(term: &Term) -> Settings {  
+    // Nested function to make prompting the input easier and better ;) (Currently only for Strings)
+    fn prompt_string(desc: &str, index: &str, default: String, term: &Term) -> String {
+        term.write_line(format!("{} (Default: '{}')", desc, default).as_str()).unwrap();
+        term.write_str(format!("{}", style(index).color256(COLOR_LIGHT_GRAY)).as_str()).unwrap();
+        let input = term.read_line().unwrap_or(String::from(""));
+        
+        let value = if !input.is_empty() {
+            input
+        } else {
+            default
+        };
+    
+        term.write_line(format!("Using value: '{}'\n", value).as_str()).unwrap();
+
+        value
+    }
+
+    let mut _settings = Settings::default();
+
+    term.write_line("Settings file generator!\nPress ENTER to use default values!\n").unwrap();
+
+    _settings.steam_folder = prompt_string(
+        "Path to Steam's userdata folder",
+        ">> ", 
+        Settings::default().steam_folder, 
+        term);
+
+    _settings.target_folder = prompt_string(
+        "Path to a folder to copy the images to, example: 'C:/Users/MyName/Pictures/MySteamPictures/'",
+        ">> ", 
+        Settings::default().target_folder, 
+        term);
+    
+    _settings
 }

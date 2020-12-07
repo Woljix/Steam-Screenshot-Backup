@@ -16,6 +16,17 @@
             "cwd": "${workspaceFolder}",
             "environment": [],
             "externalConsole": true
+        },
+        {
+            "name": "(Windows) LLDB",
+            "type": "lldb",
+            "request": "launch",
+            //"preLaunchTask": "Rust: cargo build - steam_screenshot_backup",
+            "preLaunchTask": "Rust: Build Debug",
+            "program": "target/debug/steam_screenshot_backup.exe",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "sourceLanguages": ["rust"]
         }
     ]
 }
