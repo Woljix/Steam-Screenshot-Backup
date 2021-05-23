@@ -8,7 +8,7 @@ build = "build.rs"
 [package.metadata.winres]
 ProductName = "Steam Screenshot Backup"
 FileDescription = "Steam Screenshot Backup"
-LegalCopyright = "Copyright © Woljix Software 2020"
+LegalCopyright = "Copyright © Woljix Software 2021"
 #ProductVersion = "1.0.0.0"
 #OriginalFilename = "steam_screenshot_backup.exe"
 
@@ -28,9 +28,7 @@ chrono = "0.4.19"
 
 [profile.dev]
 opt-level = 1 
-lto = 'thin'
 
 [profile.release]
 opt-level = 'z'  # Optimize for size.
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+lto = 'thin'

@@ -1,9 +1,7 @@
 use std::path::Path;
-use std::fs::File;
 use std::fs::OpenOptions;
 use std::io;
-use std::io::Write;
-use std::io::prelude::*;
+use std::io::{Write,prelude::*};
 
 use serde::{Serialize, Deserialize};
 use toml;

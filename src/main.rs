@@ -9,19 +9,15 @@ use std::process;
 use std::collections::HashMap;
 
 use console::{Term, style};
-
 use reqwest;
-
 use chrono;
-
-mod settings;
-use settings::Settings;
-
-//use reqwest;
 use walkdir::WalkDir;
 use glob::glob;
 use fs_extra;
 use serde_json::Value;
+
+mod settings;
+use settings::Settings;
 
 const STEAM_APP_LIST_URL: &str = "https://api.steampowered.com/ISteamApps/GetAppList/v2/";
 
@@ -50,14 +46,14 @@ fn main() {
 }
 
 fn run() -> io::Result<()> {  
-    let app_dir: PathBuf = {
+    let dir_app: PathBuf = {
         let exe = std::env::current_exe().unwrap();
         let parent = exe.parent().unwrap();
         parent.to_path_buf()
     };
 
-    let dir_appids = &app_dir.join("appids.json");
-    let dir_settings = &app_dir.join("settings.toml");
+    let dir_appids = &dir_app.join("appids.json");
+    let dir_settings = &dir_app.join("settings.toml");
 
     let term = Term::stdout();
     term.hide_cursor()?;
@@ -75,9 +71,9 @@ fn run() -> io::Result<()> {
     */
 
     let m_settings: Settings = if dir_settings.exists() {
-        if let Ok(i) = Settings::load(dir_settings.as_path()) {
+        if let Ok(settings) = Settings::load(dir_settings.as_path()) {
             // If the settings file exists, and it loaded properly; return it.
-            i 
+            settings
         }
         else {
             // If the settigns file exists, but it for some reason failed to load, take the user to the Settings prompt with a accompaning warning.
@@ -97,11 +93,11 @@ fn run() -> io::Result<()> {
     // SETTINGS - END
 
     // ARG PROCESSING - START
-    let mut noinput: bool = false;
+    let mut flag_noinput: bool = false;
     for x in std::env::args() {
         match x.as_str() {
             "-noinput" => {
-                noinput = true;
+                flag_noinput = true;
             },
             _ => {}
         }
@@ -133,22 +129,27 @@ fn run() -> io::Result<()> {
                 };
             }
             else {
-                let metadata = fs::metadata(dir_appids).unwrap();
+                match fs::metadata(dir_appids) {
+                    Ok(metadata) => {
+                        match SystemTime::now().duration_since(metadata.modified().unwrap()) {
+                            Ok(m) => { 
+                                if chrono::Duration::from_std(m).unwrap() >= chrono::Duration::days(7) {
+                                    term.write_line("AppID file outdated! Deleting..")?;
+                                    fs::remove_file(dir_appids).unwrap();
+                                }
+                                else {                        
+                                    is_ready = true;
+                                }
+                            },
+                            Err(_) => {
+                                panic!("SystemTime not valid time format!"); // Not sure when this will happen tbh, but its safe to be safe.
+                            },
+                        };
+                    },
+                    Err(_) => panic!("Metadata acquisition failed!")
+                }
     
-                match SystemTime::now().duration_since(metadata.modified().unwrap()) {
-                    Ok(m) => { 
-                        if chrono::Duration::from_std(m).unwrap() >= chrono::Duration::days(7) {
-                            term.write_line("AppID file outdated! Deleting..")?;
-                            fs::remove_file(dir_appids).unwrap();
-                        }
-                        else {                        
-                            is_ready = true;
-                        }
-                    },
-                    Err(_) => {
-                        panic!("SystemTime not valid time format!"); // Not sure when this will happen tbh, but its safe to be safe.
-                    },
-                };
+                
             }
         }
     }
@@ -189,7 +190,7 @@ fn run() -> io::Result<()> {
                 retreived_app_name = retreived_app_name.trim().to_string();
 
                 term.write_line(format!("{}", style(format!("Found game '{0}' with AppID '{1}'", &retreived_app_name, &folder_id).as_str()).color256(COLOR_DARK_GRAY)).as_str())?;
-                if !&m_settings.disable_artifical_delay {
+                if !m_settings.disable_artifical_delay {
                     thread::sleep(Duration::from_millis(100));
                 }
             
@@ -205,9 +206,8 @@ fn run() -> io::Result<()> {
                         if let Ok(img) = entry_img {
 
                             let target_file = target_path.join(img.file_name().unwrap());
-                            
-                            let mut from_paths = Vec::new();
-                            from_paths.push(img);
+
+                            let from_paths = vec![img];
 
                             if !target_file.exists() {                               
                                 match fs_extra::copy_items(&from_paths, &target_path, &options) {
@@ -215,10 +215,9 @@ fn run() -> io::Result<()> {
                                     Err(_) => term.write_line(format!("{}", style(target_file.to_str().unwrap()).color256(COLOR_WARNING_YELLOW)).as_str())?, // Optimally this should spew out an error, but for now, i will only indicate by color that something is wrong.
                                 }
                                 
-                                if !&m_settings.disable_artifical_delay {
+                                if !m_settings.disable_artifical_delay {
                                     thread::sleep(Duration::from_millis(50));
-                                }
-                                
+                                }                               
                             }  
                             
                             drop(from_paths);
@@ -229,7 +228,7 @@ fn run() -> io::Result<()> {
         }
     }
 
-    if !noinput {
+    if !flag_noinput {
         finish(&term);
     }
 
@@ -245,7 +244,7 @@ fn finish(term: &Term) {
 }
 
 fn settings_prompt(term: &Term) -> Settings {  
-    // Nested function to make prompting the input easier and better ;) (Currently only for Strings)
+    /// Nested function to make prompting the input easier and better ;) (Currently only for Strings)
     fn prompt_string(desc: &str, index: &str, default: String, term: &Term) -> String {
         term.write_line(format!("{} (Default: '{}')", desc, default).as_str()).unwrap();
         term.write_str(format!("{}", style(index).color256(COLOR_LIGHT_GRAY)).as_str()).unwrap();
@@ -264,7 +263,7 @@ fn settings_prompt(term: &Term) -> Settings {
 
     let mut _settings = Settings::default();
 
-    term.write_line("Settings file generator!\nPress ENTER to use default values!\n").unwrap();
+    term.write_line("Settings file generator!\nPress ENTER to use the default value.\n").unwrap();
 
     _settings.steam_folder = prompt_string(
         "Path to Steam's userdata folder",
